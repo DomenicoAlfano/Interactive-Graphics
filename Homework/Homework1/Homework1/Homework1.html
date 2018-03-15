@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html>
+
+<button id = "ButtonX">Rotate X</button>
+<button id = "ButtonY">Rotate Y</button>
+<button id = "ButtonZ">Rotate Z</button>
+<button id = "ButtonT">Toggle Rotation</button>
+<button id = "new_text">New Texture</button>
+<button id = "point_light_button">Point Light</button>
+<button id = "spot_light_button">Spot Light</button>
+<button id = "directional_light_button">Directional light</button>
+<button id = "gouraud_model_button">Gouraud Shading</button>
+<button id = "phong_model_button">Phong Shading</button>
+
+<script id="vertex-shader" type="x-shader/x-vertex">
+
+attribute  vec4 vertex_position;
+attribute  vec4 vertex_color;
+attribute  vec2 vertex_tex_coord;
+attribute  vec3 vertex_normal;
+
+varying vec4 fragment_color;
+varying vec2 fragment_tex_coord;
+
+uniform vec4 ambient_prod, diffuse_prod, specular_prod;
+uniform vec4 light_pos; 
+uniform float brightness;
+
+//usati per gli if nel vertex(per capire quale luce e modello azionare)
+uniform int pl_active;
+uniform int dl_active;
+uniform int sl_active;
+uniform int phong_model;
+uniform int gouraud_model;
+uniform vec3 theta;
+
+varying vec3 N; 
+varying vec4 ambient_prod_frag, diffuse_prod_frag, specular_prod_frag;
+varying float brightness_frag;
+varying float phong_model_frag;
+
+//usati per gli if nel fragment
+varying float dl_active_frag;
+varying float pl_active_frag;
+varying float sl_active_frag;
+
+varying vec3 light;
+varying vec3 pos;
+
+void main()
+{
+    // Compute the sines and cosines of theta for each of
+    //   the three axes in one computation.
+    vec3 angles = radians( theta );
+    vec3 c = cos( angles );
+    vec3 s = sin( angles );
+
+    // Remeber: thse matrices are column-major
+    mat4 rx = mat4( 1.0,  0.0,  0.0, 0.0,
+		    0.0,  c.x,  s.x, 0.0,
+		    0.0, -s.x,  c.x, 0.0,
+		    0.0,  0.0,  0.0, 1.0 );
+
+    mat4 ry = mat4( c.y, 0.0, -s.y, 0.0,
+		    0.0, 1.0,  0.0, 0.0,
+		    s.y, 0.0,  c.y, 0.0,
+		    0.0, 0.0,  0.0, 1.0 );
+
+
+    mat4 rz = mat4( c.z, s.z, 0.0, 0.0,
+		    -s.z,  c.z, 0.0, 0.0,
+		    0.0,  0.0, 1.0, 0.0,
+		    0.0,  0.0, 0.0, 1.0 );
+
+    
+    fragment_tex_coord = vertex_tex_coord;
+    // creo matrice modelview e setto posizione vertici
+    mat4 modelViewMatrix = rz * ry * rx;
+    gl_Position = modelViewMatrix * vertex_position;
+    gl_Position.z = -gl_Position.z;
+    
+    pos = (modelViewMatrix * vertex_position).xyz;    
+    light = light_pos.xyz;
+    
+    vec3 L, E;
+    if(gouraud_model == 1) {
+    	//vettore che punta alla camera(eye), uguale per tutte le luce
+    	E = normalize(-pos);
+         //caso point light/diffuse light
+        if(pl_active == 1 || sl_active == 1) {   
+            vec3 dist_vector = light - pos;
+            float distance = sqrt(dist_vector.x*dist_vector.x + dist_vector.y*dist_vector.y + dist_vector.z*dist_vector.z);
+            //vettore L direzione superfice verso luce
+            L = normalize(dist_vector);
+            //le normali vengono ruotate al base all'angolo di rotazione attuale
+            vec4 NN = vec4(vertex_normal,0);
+            N = normalize((modelViewMatrix*NN).xyz);
+            //vettore H per il calcolo approssimato della luce
+            vec3 H = normalize(L+E);
+            vec4 ambient = ambient_prod;
+            float Kd = max( dot(L, N), 0.0 ); 
+            vec4  diffuse = Kd*diffuse_prod; 
+            float Ks = pow( max(dot(N, H), 0.0), brightness ); 
+            vec4  specular = Ks * specular_prod; 
+            if( dot(L, N) < 0.0 )  
+                specular = vec4(0.0, 0.0, 0.0, 1.0);
+            //calcolo dell attenuazione, in caso sia spotLight o pointLight
+            float attenuation;
+            //se la luce attivata è spotLight
+            if(sl_active == 1) {
+            	//la luce punta verso il centro del cubo
+                float lightToSurfaceAngle = dot(normalize(-light),-L);
+                //sono fuori dal cono di luce. 
+                if(lightToSurfaceAngle < 0.845)
+                    attenuation = 0.0;
+                //dentro al cono di luce
+                else
+                	attenuation = (1.0/(distance*distance));
+            }
+            //se la luce è una pointlight
+            else
+                attenuation = (1.0/(distance*distance));
+            vec4 color = ambient + (diffuse + specular)*attenuation; 
+            color.a = 1.0;
+            fragment_color = vertex_color*color;
+        }
+        //caso directionalLight
+        else if(dl_active == 1) {
+        	//le rette L non cambiano e sono tutte parallele
+            L = normalize(light);
+            vec4 NN = vec4(vertex_normal,0);
+            N = normalize((modelViewMatrix*NN).xyz);
+            //vettore H per il calcolo approssimato della luce
+            vec3 H = normalize(L+E);
+            vec4 ambient = ambient_prod;
+            float Kd = max( dot(L, N), 0.0 ); 
+            vec4  diffuse = Kd*diffuse_prod; 
+            float Ks = pow( max(dot(N, H), 0.0), brightness ); 
+            vec4  specular = Ks * specular_prod; 
+            if( dot(L, N) < 0.0 )  
+                specular = vec4(0.0, 0.0, 0.0, 1.0);
+            vec4 color = ambient + diffuse + specular;
+            color.a = 1.0; 
+            fragment_color = vertex_color*color;
+        }
+     	//se nessuna luce è attivata
+        else
+            fragment_color = vertex_color;
+    }
+    //se il modello non è gouraud, setto tutto per mandarlo al fragment
+    else {
+        phong_model_frag = 1.0;
+        vec4 NN = vec4(vertex_normal,0);
+        N = normalize((modelViewMatrix*NN).xyz);
+        //directional Light
+        if(dl_active == 1) {
+            dl_active_frag = 1.0;
+        }
+        else
+            dl_active_frag = 0.0;
+        //pointLight
+        if(pl_active == 1) {
+            pl_active_frag = 1.0;
+        }
+        else
+            pl_active_frag = 0.0;
+        //spotLight
+        if(sl_active == 1) {
+            sl_active_frag = 1.0;
+        }
+        else
+            sl_active_frag = 0.0;
+        //trasferisco al fragment anche i valori calcolati nello javascript
+        ambient_prod_frag = ambient_prod;
+        diffuse_prod_frag = diffuse_prod;
+        specular_prod_frag = specular_prod;
+        brightness_frag = brightness;
+        fragment_color = vertex_color;
+    }
+}
+</script>
+
+<script id="fragment-shader" type="x-shader/x-fragment">
+
+precision mediump float;
+
+varying vec4 fragment_color;
+varying  vec2 fragment_tex_coord;
+
+uniform sampler2D Tex0;
+uniform sampler2D Tex1;
+uniform sampler2D Tex2;
+
+//usato per l'if nel calcolo della luce finale, con la texture aggiuntiva o no
+uniform int add_new_text;
+
+varying vec3 N;
+varying vec4 ambient_prod_frag, diffuse_prod_frag, specular_prod_frag; 
+varying float brightness_frag; 
+varying float phong_model_frag;
+
+//usati per i vari if 
+varying float dl_active_frag;
+varying float pl_active_frag;
+varying float sl_active_frag;
+
+//per il calcolo dell'attenuazione
+//varying float distance;
+varying vec3 light;
+varying vec3 pos;
+void
+main()
+{
+	vec3 L, E;
+    //faccio come sopra. Una caterba di if per i vari casi, molta ridondanza
+    if(phong_model_frag == 1.0) {
+    	E = normalize(-pos);
+    	//pointLight e spotLight
+    	if(pl_active_frag == 1.0 || sl_active_frag == 1.0) {
+    		L = normalize(light - pos);
+    	}
+    	//directionalLight
+    	else {
+    		L = normalize(light);
+    	}
+
+        vec4 fragment_color_; 
+        vec3 H = normalize( L + E ); 
+        vec4 ambient = ambient_prod_frag; 
+        float Kd = max( dot(L, N), 0.0 ); 
+        vec4  diffuse = Kd*diffuse_prod_frag; 
+        float Ks = pow( max(dot(N, H), 0.0), brightness_frag ); 
+        vec4  specular = Ks * specular_prod_frag; 
+        if( dot(L, N) < 0.0 ) 
+            specular = vec4(0.0, 0.0, 0.0, 1.0); 
+        //sempre per il calcolo dell attenuazione
+        vec3 dist_vector = light - pos;
+        float distance = sqrt(dist_vector.x*dist_vector.x + dist_vector.y*dist_vector.y + dist_vector.z*dist_vector.z);
+        //nel caso della pointLight o spotLight
+        if(pl_active_frag == 1.0 || sl_active_frag == 1.0) {
+            float attenuation;
+            //se sono nel caso spotLight, calcolo l attenuazione corretta
+            if(sl_active_frag == 1.0) {
+            	//la luce punta verso il centro del cubo
+                float lightToSurfaceAngle = dot(normalize(-light), -L);
+                //fuori dal cono di luce
+                if(lightToSurfaceAngle < 0.935 )
+                    attenuation = 0.0;
+                //dentro al cono di luce
+                else
+                	attenuation = 1.0/(distance*distance);
+            }
+            //caso pointLight
+            else
+                attenuation = 1.0/(distance*distance);
+            fragment_color_ = ambient + (diffuse+specular)*attenuation; 
+            fragment_color_.a = 1.0;
+            //in base alla texture nuova inserita o meno, calcolo la nuova luce
+            if(add_new_text == 1) 
+            	gl_FragColor = fragment_color_*fragment_color*(texture2D(Tex0, fragment_tex_coord)*texture2D(Tex1, fragment_tex_coord)+texture2D(Tex2, fragment_tex_coord));
+            else
+            	gl_FragColor = fragment_color_*fragment_color*(texture2D(Tex0, fragment_tex_coord)*texture2D(Tex1, fragment_tex_coord));
+        }
+        //caso directionalLight
+        else if(dl_active_frag == 1.0) {
+            fragment_color_ = ambient + diffuse + specular; 
+            fragment_color_.a = 1.0; 
+            if(add_new_text == 1) 
+            	gl_FragColor = fragment_color_*fragment_color*(texture2D(Tex0, fragment_tex_coord)*texture2D(Tex1, fragment_tex_coord)+texture2D(Tex2, fragment_tex_coord));
+            else
+            	gl_FragColor = fragment_color_*fragment_color*(texture2D(Tex0, fragment_tex_coord)*texture2D(Tex1, fragment_tex_coord));
+        }
+        //nessuna luce attiva
+        else {
+            if(add_new_text == 1) 
+            	gl_FragColor = fragment_color*(texture2D(Tex0, fragment_tex_coord)*texture2D(Tex1, fragment_tex_coord)+texture2D(Tex2, fragment_tex_coord));
+            else
+            	gl_FragColor = fragment_color*(texture2D(Tex0, fragment_tex_coord)*texture2D(Tex1, fragment_tex_coord));
+        }
+    }
+    //se non è in uso Phong
+    else {
+        if(add_new_text == 1) 
+            	gl_FragColor = fragment_color*(texture2D(Tex0, fragment_tex_coord)*texture2D(Tex1, fragment_tex_coord)+texture2D(Tex2, fragment_tex_coord));
+            else
+            	gl_FragColor = fragment_color*(texture2D(Tex0, fragment_tex_coord)*texture2D(Tex1, fragment_tex_coord));
+    }
+}
+</script>
+
+<script type="text/javascript" src="../Common/webgl-utils.js"></script>
+<script type="text/javascript" src="../Common/initShaders.js"></script>
+<script type="text/javascript" src="../Common/MV.js"></script>
+<script type="text/javascript" src="Homework1.js"></script>
+
+<body>
+<canvas id="gl-canvas" width="1024" height="1024">
+Oops ... your browser doesn't support the HTML5 canvas element
+</canvas>
+</body>
+</html>
